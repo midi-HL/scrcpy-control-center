@@ -15,7 +15,6 @@
 #include "imgui_impl_dx9.h"
 #include <d3d9.h>
 
-// Forward declare message handler from imgui_impl_win32.cpp
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 App& App::instance() {
@@ -35,6 +34,7 @@ LRESULT WINAPI App::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 auto& app = App::instance();
                 app.m_windowWidth = LOWORD(lParam);
                 app.m_windowHeight = HIWORD(lParam);
+                app.m_needsResize = true;  // flag for main loop to reset device
             }
             return 0;
         case WM_DESTROY:
@@ -57,14 +57,10 @@ bool App::initWindow(HINSTANCE hInstance) {
     RegisterClassEx(&wc);
 
     m_hwnd = CreateWindowEx(
-        0,
-        wc.lpszClassName,
-        "Scrcpy Control Center",
+        0, wc.lpszClassName, "Scrcpy Control Center",
         WS_OVERLAPPEDWINDOW,
-        100, 100,
-        m_windowWidth, m_windowHeight,
-        nullptr, nullptr,
-        hInstance, nullptr
+        100, 100, m_windowWidth, m_windowHeight,
+        nullptr, nullptr, hInstance, nullptr
     );
 
     if (!m_hwnd) {
@@ -92,26 +88,21 @@ bool App::initDirectX() {
     m_d3dpp.BackBufferFormat = D3DFMT_UNKNOWN;
     m_d3dpp.EnableAutoDepthStencil = TRUE;
     m_d3dpp.AutoDepthStencilFormat = D3DFMT_D16;
-    m_d3dpp.PresentationInterval = D3DPRESENT_INTERVAL_ONE; // VSync
+    m_d3dpp.PresentationInterval = D3DPRESENT_INTERVAL_ONE;
+    m_d3dpp.BackBufferWidth = m_windowWidth;
+    m_d3dpp.BackBufferHeight = m_windowHeight;
 
     HRESULT hr = m_d3d->CreateDevice(
-        D3DADAPTER_DEFAULT,
-        D3DDEVTYPE_HAL,
-        m_hwnd,
+        D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, m_hwnd,
         D3DCREATE_HARDWARE_VERTEXPROCESSING,
-        &m_d3dpp,
-        &m_d3dDevice
+        &m_d3dpp, &m_d3dDevice
     );
 
     if (FAILED(hr)) {
-        // Fallback to software vertex processing
         hr = m_d3d->CreateDevice(
-            D3DADAPTER_DEFAULT,
-            D3DDEVTYPE_HAL,
-            m_hwnd,
+            D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, m_hwnd,
             D3DCREATE_SOFTWARE_VERTEXPROCESSING,
-            &m_d3dpp,
-            &m_d3dDevice
+            &m_d3dpp, &m_d3dDevice
         );
     }
 
@@ -120,7 +111,28 @@ bool App::initDirectX() {
         return false;
     }
 
-    LOG_INFO("DirectX 9 initialized successfully");
+    LOG_INFO("DirectX 9 initialized (%dx%d)", m_windowWidth, m_windowHeight);
+    return true;
+}
+
+// ── Reset DX9 Device (called on window resize) ──────────────────────────────
+
+bool App::resetDevice() {
+    if (!m_d3dDevice) return false;
+
+    ImGui_ImplDX9_InvalidateDeviceObjects();
+
+    m_d3dpp.BackBufferWidth = m_windowWidth;
+    m_d3dpp.BackBufferHeight = m_windowHeight;
+
+    HRESULT hr = m_d3dDevice->Reset(&m_d3dpp);
+    if (FAILED(hr)) {
+        LOG_ERROR("Device reset failed: 0x%08lx", hr);
+        return false;
+    }
+
+    ImGui_ImplDX9_CreateDeviceObjects();
+    LOG_INFO("Device reset to %dx%d", m_windowWidth, m_windowHeight);
     return true;
 }
 
@@ -132,14 +144,65 @@ bool App::initImGui() {
 
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-
-    // Disable ImGui.ini file (we manage our own config)
     io.IniFilename = nullptr;
 
-    // Setup ImGui style
+    // ── Load font with CJK (Chinese/Japanese/Korean) support ─────────────────
+    // Try to load a CJK font from Windows Fonts directory
+    const char* cjkFontPaths[] = {
+        "C:\\Windows\\Fonts\\msyh.ttc",     // Microsoft YaHei (Chinese Win)
+        "C:\\Windows\\Fonts\\msyhbd.ttc",   // Microsoft YaHei Bold
+        "C:\\Windows\\Fonts\\simhei.ttf",   // SimHei (older Chinese Win)
+        "C:\\Windows\\Fonts\\simsun.ttc",   // SimSun
+        "C:\\Windows\\Fonts\\arial.ttf",    // Arial (fallback, no CJK)
+        nullptr
+    };
+
+    bool fontLoaded = false;
+    for (const char* path : cjkFontPaths) {
+        if (!path) break;
+
+        // Check if file exists
+        DWORD attr = GetFileAttributesA(path);
+        if (attr == INVALID_FILE_ATTRIBUTES) continue;
+
+        // Build font config with Chinese glyph ranges
+        ImFontConfig fontCfg;
+        fontCfg.OversampleH = 1;
+        fontCfg.OversampleV = 1;
+
+        // Add Chinese glyph ranges
+        static const ImWchar ranges[] = {
+            0x0020, 0x00FF, // Basic Latin + Latin Supplement
+            0x2000, 0x206F, // General Punctuation
+            0x3000, 0x30FF, // CJK Symbols, Hiragana, Katakana
+            0x31F0, 0x31FF, // Katakana Extensions
+            0xFF00, 0xFFEF, // Halfwidth and Fullwidth Forms
+            0x4E00, 0x9FFF, // CJK Unified Ideographs (Chinese characters)
+            0x3400, 0x4DBF, // CJK Unified Ideographs Extension A
+            0,
+        };
+
+        ImFont* font = io.Fonts->AddFontFromFileTTF(path, 16.0f, &fontCfg, ranges);
+        if (font) {
+            LOG_INFO("Loaded font: %s (with CJK glyphs)", path);
+            fontLoaded = true;
+            break;
+        }
+    }
+
+    if (!fontLoaded) {
+        // Final fallback: default ImGui font (no CJK)
+        io.Fonts->AddFontDefault();
+        LOG_WARN("No CJK font found, Chinese text may not display correctly");
+    }
+
+    // Build font atlas
+    io.Fonts->Build();
+
+    // Setup style
     ImGui::StyleColorsDark();
     ImGuiStyle& style = ImGui::GetStyle();
-    style.WindowRounding = 0.0f;    // No rounded corners (flat design)
+    style.WindowRounding = 0.0f;
     style.FrameRounding = 0.0f;
     style.GrabRounding = 0.0f;
     style.ScrollbarRounding = 0.0f;
@@ -148,7 +211,6 @@ bool App::initImGui() {
     style.WindowBorderSize = 1.0f;
     style.FrameBorderSize = 1.0f;
 
-    // Platform/Renderer backends
     ImGui_ImplWin32_Init(m_hwnd);
     ImGui_ImplDX9_Init(m_d3dDevice);
 
@@ -179,7 +241,7 @@ void App::applyLightTheme() {
 // ── Full Initialization ─────────────────────────────────────────────────────
 
 bool App::init(HINSTANCE hInstance) {
-    // 0. DPI awareness for multi-resolution support (Win8.1 compatible)
+    // DPI awareness for multi-resolution support
     typedef BOOL(WINAPI *SetProcessDPIAwareFunc)();
     auto pSetDPIAware = (SetProcessDPIAwareFunc)GetProcAddress(
         GetModuleHandleA("user32.dll"), "SetProcessDPIAware");
@@ -188,54 +250,33 @@ bool App::init(HINSTANCE hInstance) {
         LOG_INFO("DPI awareness enabled");
     }
 
-    // 1. Load feature mapping (must be first — everything depends on this)
     if (!FeatureParser::instance().loadFromFile("config/scrcpy_features.json")) {
-        LOG_ERROR("Failed to load feature mapping — UI will be empty");
+        LOG_ERROR("Failed to load feature mapping");
     }
 
-    // 2. Initialize state from feature defaults
     StateManager::instance().initFromDefaults();
-
-    // 3. Initialize config manager (sets default paths to app directory)
     ConfigManager::instance().init("config");
-
-    // 4. Load saved state if exists
     StateManager::instance().loadFromJson("config/last_state.json");
 
-    // 5. Create Win32 window
     if (!initWindow(hInstance)) return false;
-
-    // 6. Initialize DirectX 9
     if (!initDirectX()) return false;
-
-    // 7. Initialize ImGui
     if (!initImGui()) return false;
 
-    // 8. Initialize icon manager
     IconManager::instance().init("cache/icons");
 
-    // 9. Start device polling (interval from settings, default 20s)
     auto& cfg = ConfigManager::instance().getSettings();
-    int pollIntervalMs = cfg.devicePollingInterval * 1000;
-    DeviceManager::instance().startPolling(cfg.adbPath, pollIntervalMs);
+    DeviceManager::instance().startPolling(cfg.adbPath, cfg.devicePollingInterval * 1000);
 
-    // 10. Wire up ProcessManager output → Logger
     ProcessManager::instance().setOutputCallback([](const std::string& line) {
         std::string trimmed = line;
-        while (!trimmed.empty() && (trimmed.back() == '\n' || trimmed.back() == '\r')) {
+        while (!trimmed.empty() && (trimmed.back() == '\n' || trimmed.back() == '\r'))
             trimmed.pop_back();
-        }
-        if (!trimmed.empty()) {
-            LOG_INFO("[scrcpy] %s", trimmed.c_str());
-        }
+        if (!trimmed.empty()) LOG_INFO("[scrcpy] %s", trimmed.c_str());
     });
 
-    // 11. Apply theme
-    if (cfg.theme == "light") {
-        applyLightTheme();
-    }
+    if (cfg.theme == "light") applyLightTheme();
 
-    LOG_INFO("Application initialized successfully (polling: %ds, scrcpy: %s, adb: %s)",
+    LOG_INFO("App initialized (poll: %ds, scrcpy: %s, adb: %s)",
              cfg.devicePollingInterval, cfg.scrcpyPath.c_str(), cfg.adbPath.c_str());
     return true;
 }
@@ -247,22 +288,26 @@ int App::run() {
     ZeroMemory(&msg, sizeof(msg));
 
     while (m_running) {
-        // Process Windows messages
         while (PeekMessage(&msg, nullptr, 0U, 0U, PM_REMOVE)) {
             TranslateMessage(&msg);
             DispatchMessage(&msg);
-            if (msg.message == WM_QUIT) {
-                m_running = false;
-            }
+            if (msg.message == WM_QUIT) m_running = false;
         }
         if (!m_running) break;
 
-        // Begin ImGui frame
+        // ── Handle window resize ─────────────────────────────────────────────
+        if (m_needsResize) {
+            m_needsResize = false;
+            if (m_windowWidth > 0 && m_windowHeight > 0) {
+                resetDevice();
+            }
+        }
+
+        // ── ImGui frame ──────────────────────────────────────────────────────
         ImGui_ImplDX9_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
 
-        // ── Full-window ImGui layout ─────────────────────────────────────────
         const ImGuiViewport* viewport = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(viewport->WorkPos);
         ImGui::SetNextWindowSize(viewport->WorkSize);
@@ -276,12 +321,8 @@ int App::run() {
 
         ImGui::Begin("##MainWindow", nullptr, windowFlags);
 
-        // Left sidebar
         auto selected = Sidebar::instance().render();
-
         ImGui::SameLine();
-
-        // Right content panel
         ContentPanel::instance().render(selected);
 
         ImGui::End();
@@ -304,11 +345,21 @@ int App::run() {
 
         HRESULT hr = m_d3dDevice->Present(nullptr, nullptr, nullptr, nullptr);
 
-        // Handle device lost
+        // Handle device lost (alt-tab, lock screen, etc.)
         if (hr == D3DERR_DEVICELOST) {
+            LOG_WARN("Device lost, waiting for restore...");
+            Sleep(100);
+            // Try to reset with current window size
+            m_d3dpp.BackBufferWidth = m_windowWidth;
+            m_d3dpp.BackBufferHeight = m_windowHeight;
             ImGui_ImplDX9_InvalidateDeviceObjects();
-            m_d3dDevice->Reset(&m_d3dpp);
-            ImGui_ImplDX9_CreateDeviceObjects();
+            hr = m_d3dDevice->Reset(&m_d3dpp);
+            if (SUCCEEDED(hr)) {
+                ImGui_ImplDX9_CreateDeviceObjects();
+                LOG_INFO("Device restored");
+            }
+        } else if (hr == D3DERR_DEVICENOTRESET) {
+            resetDevice();
         }
     }
 
@@ -318,26 +369,17 @@ int App::run() {
 // ── Shutdown ────────────────────────────────────────────────────────────────
 
 void App::shutdown() {
-    // Save current state
     StateManager::instance().saveToJson("config/last_state.json");
-
-    // Stop device polling
     DeviceManager::instance().stopPolling();
-
-    // Kill all child processes (zombie prevention)
     ProcessManager::instance().cleanup();
 
-    // Shutdown ImGui
     ImGui_ImplDX9_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
 
-    // Release DirectX
     if (m_d3dDevice) { m_d3dDevice->Release(); m_d3dDevice = nullptr; }
     if (m_d3d) { m_d3d->Release(); m_d3d = nullptr; }
 
-    // Destroy window
     DestroyWindow(m_hwnd);
-
-    LOG_INFO("Application shut down cleanly");
+    LOG_INFO("Application shut down");
 }

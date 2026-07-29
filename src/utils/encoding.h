@@ -2,23 +2,68 @@
 #include <string>
 #include <windows.h>
 
-// Windows codepage conversion utilities.
-// Critical for proper display of adb/scrcpy output on Chinese Windows (GBK/CP936).
-// ImGui expects UTF-8, but adb.exe may output GBK on Chinese systems.
+// Configurable encoding system for adb/scrcpy output conversion.
+// Supports auto-detection and manual override for different locales.
 namespace Encoding {
 
-    // Convert from system codepage (GBK on Chinese Windows) to UTF-8
-    inline std::string systemToUtf8(const std::string& input) {
+    // Encoding mode
+    enum class EncodingMode : int {
+        Auto = 0,     // Auto-detect from system codepage
+        UTF8,         // Force UTF-8 (no conversion needed)
+        GBK,          // Chinese Simplified (CP936)
+        Big5,         // Chinese Traditional (CP950)
+        ShiftJIS,     // Japanese (CP932)
+        EUC_KR,       // Korean (CP949)
+        Latin1        // Western European (CP1252)
+    };
+
+    // Current encoding mode (configurable via Settings)
+    inline EncodingMode g_encodingMode = EncodingMode::Auto;
+
+    // Get the codepage for a given encoding mode
+    inline UINT getCodepage(EncodingMode mode) {
+        switch (mode) {
+            case EncodingMode::UTF8:     return CP_UTF8;
+            case EncodingMode::GBK:      return 936;
+            case EncodingMode::Big5:     return 950;
+            case EncodingMode::ShiftJIS: return 932;
+            case EncodingMode::EUC_KR:   return 949;
+            case EncodingMode::Latin1:   return 1252;
+            default: return GetConsoleOutputCP(); // Auto
+        }
+    }
+
+    // Get the name of an encoding mode
+    inline const char* getEncodingName(EncodingMode mode) {
+        switch (mode) {
+            case EncodingMode::Auto:     return "Auto (System Default)";
+            case EncodingMode::UTF8:     return "UTF-8";
+            case EncodingMode::GBK:      return "GBK (Chinese Simplified)";
+            case EncodingMode::Big5:     return "Big5 (Chinese Traditional)";
+            case EncodingMode::ShiftJIS: return "Shift-JIS (Japanese)";
+            case EncodingMode::EUC_KR:   return "EUC-KR (Korean)";
+            case EncodingMode::Latin1:   return "Latin-1 (Western)";
+            default: return "Unknown";
+        }
+    }
+
+    // Convert from current source encoding to UTF-8
+    inline std::string toUtf8(const std::string& input) {
         if (input.empty()) return "";
 
-        // Step 1: System codepage → Wide char (UTF-16)
-        int wideLen = MultiByteToWideChar(CP_ACP, 0, input.c_str(), -1, nullptr, 0);
-        if (wideLen <= 0) return input; // fallback: return as-is
+        UINT srcCP = getCodepage(g_encodingMode);
+
+        // If source is already UTF-8, no conversion needed
+        if (srcCP == CP_UTF8) return input;
+
+        // Step 1: Source codepage → Wide char
+        int wideLen = MultiByteToWideChar(srcCP, 0, input.c_str(), -1, nullptr, 0);
+        if (wideLen <= 0) return input;
 
         std::wstring wideStr(wideLen - 1, L'\0');
-        MultiByteToWideChar(CP_ACP, 0, input.c_str(), -1, &wideStr[0], wideLen);
+        MultiByteToWideChar(srcCP, 0, input.c_str(), -1, &wideStr[0], wideLen);
 
-        // Step 2: Wide char (UTF-16) → UTF-8
+        // Step 2: Wide char → UTF-8
         int utf8Len = WideCharToMultiByte(CP_UTF8, 0, wideStr.c_str(), -1, nullptr, 0, nullptr, nullptr);
         if (utf8Len <= 0) return input;
 
@@ -28,9 +73,12 @@ namespace Encoding {
         return utf8Str;
     }
 
-    // Convert from UTF-8 to system codepage (for CreateProcess command lines)
-    inline std::string utf8ToSystem(const std::string& input) {
+    // Convert from UTF-8 to current source encoding (for CreateProcess)
+    inline std::string fromUtf8(const std::string& input) {
         if (input.empty()) return "";
+
+        UINT dstCP = getCodepage(g_encodingMode);
+        if (dstCP == CP_UTF8) return input;
 
         int wideLen = MultiByteToWideChar(CP_UTF8, 0, input.c_str(), -1, nullptr, 0);
         if (wideLen <= 0) return input;
@@ -38,24 +86,20 @@ namespace Encoding {
         std::wstring wideStr(wideLen - 1, L'\0');
         MultiByteToWideChar(CP_UTF8, 0, input.c_str(), -1, &wideStr[0], wideLen);
 
-        int sysLen = WideCharToMultiByte(CP_ACP, 0, wideStr.c_str(), -1, nullptr, 0, nullptr, nullptr);
-        if (sysLen <= 0) return input;
+        int dstLen = WideCharToMultiByte(dstCP, 0, wideStr.c_str(), -1, nullptr, 0, nullptr, nullptr);
+        if (dstLen <= 0) return input;
 
-        std::string sysStr(sysLen - 1, '\0');
-        WideCharToMultiByte(CP_ACP, 0, wideStr.c_str(), -1, &sysStr[0], sysLen, nullptr, nullptr);
+        std::string dstStr(dstLen - 1, '\0');
+        WideCharToMultiByte(dstCP, 0, wideStr.c_str(), -1, &dstStr[0], dstLen, nullptr, nullptr);
 
-        return sysStr;
+        return dstStr;
     }
 
-    // Get current console codepage
-    inline UINT getConsoleCodepage() {
-        return GetConsoleOutputCP();
-    }
-
-    // Check if current system is using a DBCS (double-byte) codepage like GBK
+    // Legacy compatibility
+    inline std::string systemToUtf8(const std::string& input) { return toUtf8(input); }
     inline bool isDbcsCodepage() {
-        UINT cp = getConsoleCodepage();
-        return (cp == 936 || cp == 950 || cp == 932 || cp == 949); // GBK, Big5, Shift-JIS, EUC-KR
+        UINT cp = getCodepage(g_encodingMode);
+        return (cp != CP_UTF8 && cp != 1252);
     }
 
 } // namespace Encoding

@@ -34,11 +34,13 @@ private:
     bool initWindow(HINSTANCE hInstance);
     bool initDirectX();
     bool initImGui();
+    bool resetDevice();
 
     HWND m_hwnd = nullptr;
     int m_windowWidth = 1280;
     int m_windowHeight = 720;
     bool m_running = true;
+    volatile bool m_needsResize = false;
 
     // DirectX 9 objects
     LPDIRECT3D9 m_d3d = nullptr;

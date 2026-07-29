@@ -10,6 +10,7 @@
 #include "core/icon_manager.h"
 #include "utils/logger.h"
 #include "utils/i18n.h"
+#include "utils/encoding.h"
 #include "imgui.h"
 #include <cstdio>
 #include <cstring>
@@ -647,6 +648,29 @@ void ContentPanel::renderSettingsPanel() {
 
     // Icon fetching toggle
     ImGui::Checkbox("Fetch app icons from device (slower first load)", &cfg.fetchAppIcons);
+
+    ImGui::Spacing();
+    ImGui::Separator();
+
+    // Encoding selector
+    ImGui::Text("Text Encoding (for adb/scrcpy output)");
+    ImGui::TextDisabled("Change this if Chinese/Japanese text shows as garbled characters.");
+    const char* encodingNames[] = {
+        "Auto (System Default)", "UTF-8", "GBK (Chinese Simplified)",
+        "Big5 (Chinese Traditional)", "Shift-JIS (Japanese)",
+        "EUC-KR (Korean)", "Latin-1 (Western)"
+    };
+    int currentEncoding = static_cast<int>(Encoding::g_encodingMode);
+    if (ImGui::BeginCombo("##encoding", encodingNames[currentEncoding])) {
+        for (int i = 0; i < 7; ++i) {
+            bool isSelected = (currentEncoding == i);
+            if (ImGui::Selectable(encodingNames[i], isSelected)) {
+                Encoding::g_encodingMode = static_cast<Encoding::EncodingMode>(i);
+            }
+            if (isSelected) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
 
     if (ImGui::Button("Save Settings", ImVec2(150, 0))) {
         cfg.scrcpyPath = scrcpyPath;

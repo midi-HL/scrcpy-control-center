@@ -539,6 +539,124 @@
       "max": 3600,
       "disables": [],
       "disabled_by": []
+    },
+
+    {
+      "id": "gamepad",
+      "gui_label_en": "Gamepad Mode",
+      "gui_label_zh": "手柄模式",
+      "category": "control",
+      "parameter": "--gamepad",
+      "type": "enum",
+      "options": ["sdk", "uhid", "aoa", "disabled"],
+      "default": "disabled",
+      "disables": [],
+      "disabled_by": ["otg"]
+    },
+    {
+      "id": "no_control",
+      "gui_label_en": "Disable Control (view only)",
+      "gui_label_zh": "禁用控制 (仅查看)",
+      "category": "control",
+      "parameter": "--no-control",
+      "type": "boolean",
+      "default": "false",
+      "disables": ["keyboard", "mouse", "gamepad", "show_touches"],
+      "disabled_by": ["otg"]
+    },
+    {
+      "id": "keyboard_shortcuts_only",
+      "gui_label_en": "Keyboard Shortcuts Only",
+      "gui_label_zh": "仅键盘快捷键",
+      "category": "control",
+      "parameter": "--keyboard-shortcuts-only",
+      "type": "boolean",
+      "default": "false",
+      "disables": [],
+      "disabled_by": ["otg"]
+    },
+
+    {
+      "id": "no_video_playback",
+      "gui_label_en": "No Video Playback (capture only)",
+      "gui_label_zh": "无视频回放 (仅采集)",
+      "category": "display",
+      "parameter": "--no-video-playback",
+      "type": "boolean",
+      "default": "false",
+      "disables": [],
+      "disabled_by": []
+    },
+    {
+      "id": "no_downsize_on_error",
+      "gui_label_en": "Don't Downsize on Error",
+      "gui_label_zh": "出错时不降分辨率",
+      "category": "display",
+      "parameter": "--no-downsize-on-error",
+      "type": "boolean",
+      "default": "false",
+      "disables": [],
+      "disabled_by": []
+    },
+    {
+      "id": "render_fit",
+      "gui_label_en": "Render Fit Mode",
+      "gui_label_zh": "渲染适配模式",
+      "category": "display",
+      "parameter": "--render-fit",
+      "type": "enum",
+      "options": ["letterbox", "unscaled", "stretched"],
+      "default": "letterbox",
+      "disables": [],
+      "disabled_by": []
+    },
+
+    {
+      "id": "no_audio_playback",
+      "gui_label_en": "No Audio Playback (capture only)",
+      "gui_label_zh": "无音频回放 (仅采集)",
+      "category": "audio",
+      "parameter": "--no-audio-playback",
+      "type": "boolean",
+      "default": "false",
+      "disables": [],
+      "disabled_by": ["no_audio"]
+    },
+    {
+      "id": "audio_output_buffer",
+      "gui_label_en": "Audio Output Buffer (ms)",
+      "gui_label_zh": "音频输出缓冲 (毫秒)",
+      "category": "audio",
+      "parameter": "--audio-output-buffer",
+      "type": "int",
+      "default": "10",
+      "min": 5,
+      "max": 100,
+      "disables": [],
+      "disabled_by": ["no_audio"]
+    },
+    {
+      "id": "require_audio",
+      "gui_label_en": "Require Audio (fail if unavailable)",
+      "gui_label_zh": "要求音频 (不可用则失败)",
+      "category": "audio",
+      "parameter": "--require-audio",
+      "type": "boolean",
+      "default": "false",
+      "disables": [],
+      "disabled_by": ["no_audio"]
+    },
+
+    {
+      "id": "no_playback",
+      "gui_label_en": "No Playback (record only)",
+      "gui_label_zh": "无回放 (仅录制)",
+      "category": "recording",
+      "parameter": "--no-playback",
+      "type": "boolean",
+      "default": "false",
+      "disables": ["no_video_playback", "no_audio_playback"],
+      "disabled_by": []
     }
   ]
 }
