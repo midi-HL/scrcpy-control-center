@@ -22,6 +22,23 @@ ContentPanel& ContentPanel::instance() {
     return s_instance;
 }
 
+// Helper: render an expandable description section
+static void renderDescription(const char* descKey) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.6f, 1.0f));
+    if (ImGui::TreeNodeEx("##desc", ImGuiTreeNodeFlags_NoTreePushOnOpen, "? %s", TR("desc_expand"))) {
+        // Not expandable with this style, use CollapsingHeader instead
+    }
+    ImGui::PopStyleColor();
+
+    // Use a small collapsible header for the description
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.55f, 0.65f, 1.0f));
+    if (ImGui::CollapsingHeader(TR("desc_show_help"))) {
+        ImGui::TextWrapped("%s", TR(descKey));
+        ImGui::Spacing();
+    }
+    ImGui::PopStyleColor();
+}
+
 void ContentPanel::render(Sidebar::MenuItem selected) {
     ImGui::BeginChild("Content", ImVec2(0, 0), ImGuiChildFlags_None);
 
@@ -42,7 +59,6 @@ void ContentPanel::render(Sidebar::MenuItem selected) {
         default: ImGui::Text("Unknown panel"); break;
     }
 
-    // Command preview at the bottom (always visible except in Logs/Settings)
     if (selected != Sidebar::MenuItem::Logs && selected != Sidebar::MenuItem::Settings) {
         renderCommandPreview();
     }
@@ -65,7 +81,8 @@ void ContentPanel::renderFeatureControls(const std::string& category) {
 
         ImGui::PushID(feature.id.c_str());
 
-        const char* label = feature.gui_label_en.c_str();
+        // Get translated label
+        const char* label = TR(feature.gui_label_en.c_str());
 
         if (feature.type == "int") {
             int* val = state.getIntRef(feature.id);
@@ -75,10 +92,7 @@ void ContentPanel::renderFeatureControls(const std::string& category) {
                 ImGui::InputInt(label, val);
                 if (*val < 0) *val = 0;
             }
-        } else if (feature.type == "boolean") {
-            bool* val = state.getBoolRef(feature.id);
-            ImGui::Checkbox(label, val);
-        } else if (feature.type == "boolean_inverse") {
+        } else if (feature.type == "boolean" || feature.type == "boolean_inverse") {
             bool* val = state.getBoolRef(feature.id);
             ImGui::Checkbox(label, val);
         } else if (feature.type == "enum") {
@@ -99,6 +113,17 @@ void ContentPanel::renderFeatureControls(const std::string& category) {
             if (ImGui::InputText(label, buf, sizeof(buf))) *val = buf;
         }
 
+        // Show feature description on hover
+        std::string featKey = "feat_" + feature.id;
+        const char* featDesc = TR(featKey.c_str());
+        if (featDesc != featKey.c_str() && ImGui::IsItemHovered()) {
+            ImGui::BeginTooltip();
+            ImGui::PushTextWrapPos(350);
+            ImGui::TextUnformatted(featDesc);
+            ImGui::PopTextWrapPos();
+            ImGui::EndTooltip();
+        }
+
         ImGui::PopID();
         if (isDisabled) ImGui::EndDisabled();
     }
@@ -110,56 +135,37 @@ void ContentPanel::renderRunningInstances() {
     auto& pm = ProcessManager::instance();
     auto instances = pm.getInstances();
 
-    // Filter to only running instances
     std::vector<InstanceInfo> running;
-    for (const auto& inst : instances) {
-        if (inst.running) running.push_back(inst);
-    }
-
+    for (const auto& inst : instances) if (inst.running) running.push_back(inst);
     if (running.empty()) return;
 
     ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.4f, 1, 0.4f, 1), "Running Instances (%zu):", running.size());
+    ImGui::TextColored(ImVec4(0.4f, 1, 0.4f, 1), "%s (%zu):", TR("running_instances"), running.size());
     ImGui::SameLine();
-    if (ImGui::SmallButton("Stop All")) {
-        pm.stopAll();
-    }
+    if (ImGui::SmallButton(TR("btn_stop_all"))) pm.stopAll();
 
     ImGui::Spacing();
 
-    if (ImGui::BeginTable("InstanceTable", 5,
+    if (ImGui::BeginTable("InstTable", 5,
         ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("App", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("Display", ImGuiTableColumnFlags_WidthFixed, 100);
-        ImGui::TableSetupColumn("PID", ImGuiTableColumnFlags_WidthFixed, 60);
-        ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthFixed, 60);
+        ImGui::TableSetupColumn("Name");
+        ImGui::TableSetupColumn("App");
+        ImGui::TableSetupColumn("Display");
+        ImGui::TableSetupColumn("PID");
+        ImGui::TableSetupColumn("##");
         ImGui::TableHeadersRow();
 
         for (size_t i = 0; i < instances.size(); ++i) {
             const auto& inst = instances[i];
             if (!inst.running) continue;
-
             ImGui::TableNextRow();
-
+            ImGui::TableNextColumn(); ImGui::Text("%s", inst.name.c_str());
+            ImGui::TableNextColumn(); ImGui::Text("%s", inst.appPackage.empty() ? "-" : inst.appPackage.c_str());
+            ImGui::TableNextColumn(); ImGui::Text("%s", inst.vdSize.empty() ? "main" : inst.vdSize.c_str());
+            ImGui::TableNextColumn(); ImGui::Text("%lu", inst.processId);
             ImGui::TableNextColumn();
-            ImGui::Text("%s", inst.name.c_str());
-
-            ImGui::TableNextColumn();
-            ImGui::Text("%s", inst.appPackage.empty() ? "-" : inst.appPackage.c_str());
-
-            ImGui::TableNextColumn();
-            ImGui::Text("%s", inst.vdSize.empty() ? "main" : inst.vdSize.c_str());
-
-            ImGui::TableNextColumn();
-            ImGui::Text("%lu", inst.processId);
-
-            ImGui::TableNextColumn();
-            char btnId[32];
-            snprintf(btnId, sizeof(btnId), "Stop##%zu", i);
-            if (ImGui::SmallButton(btnId)) {
-                pm.stopScrcpy(i);
-            }
+            char btnId[32]; snprintf(btnId, sizeof(btnId), "%s##%zu", TR("btn_stop_scrcpy"), i);
+            if (ImGui::SmallButton(btnId)) pm.stopScrcpy(i);
         }
         ImGui::EndTable();
     }
@@ -168,115 +174,98 @@ void ContentPanel::renderRunningInstances() {
 // ── Device Panel ─────────────────────────────────────────────────────────────
 
 void ContentPanel::renderDevicePanel() {
-    ImGui::Text(TR("menu_device"));
+    ImGui::Text("%s", TR("menu_device"));
     ImGui::SameLine(ImGui::GetWindowWidth() - 100);
-    if (ImGui::SmallButton("Refresh")) {
+    if (ImGui::SmallButton(TR("btn_refresh"))) {
         auto& cfg = ConfigManager::instance().getSettings();
         DeviceManager::instance().stopPolling();
         DeviceManager::instance().startPolling(cfg.adbPath, cfg.devicePollingInterval * 1000);
     }
     ImGui::Separator();
+    renderDescription("desc_device");
 
     auto& dm = DeviceManager::instance();
     auto devices = dm.getDevices();
 
     if (devices.empty()) {
-        ImGui::TextColored(ImVec4(1, 0.5f, 0.3f, 1), TR("no_device"));
+        ImGui::TextColored(ImVec4(1, 0.5f, 0.3f, 1), "%s", TR("no_device"));
         ImGui::Spacing();
-        ImGui::BulletText("Connect a device via USB cable");
-        ImGui::BulletText("Or use Connection tab for WiFi (port 5555)");
+        ImGui::BulletText("%s", TR("dev_usb_hint"));
+        ImGui::BulletText("%s", TR("dev_wifi_hint"));
         ImGui::Spacing();
-        ImGui::TextDisabled("Tip: If your old PC can't USB-connect, use another device");
-        ImGui::TextDisabled("to enable wireless ADB, then connect via WiFi here.");
+        ImGui::TextDisabled("%s", TR("dev_old_pc_hint"));
     } else {
-        ImGui::Text("Connected Devices (%zu):", devices.size());
+        ImGui::Text("%s (%zu):", TR("dev_connected"), devices.size());
         ImGui::Spacing();
 
-        if (ImGui::BeginTable("DeviceTable", 5,
+        if (ImGui::BeginTable("DevTable", 5,
             ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable)) {
-            ImGui::TableSetupColumn("Select", ImGuiTableColumnFlags_WidthFixed, 50);
-            ImGui::TableSetupColumn("Serial", ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableSetupColumn("Model", ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 80);
-            ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 50);
+            ImGui::TableSetupColumn(TR("dev_select"), ImGuiTableColumnFlags_WidthFixed, 50);
+            ImGui::TableSetupColumn(TR("dev_serial"));
+            ImGui::TableSetupColumn(TR("dev_model"));
+            ImGui::TableSetupColumn(TR("dev_state"), ImGuiTableColumnFlags_WidthFixed, 80);
+            ImGui::TableSetupColumn(TR("dev_type"), ImGuiTableColumnFlags_WidthFixed, 50);
             ImGui::TableHeadersRow();
 
             for (const auto& dev : devices) {
                 ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                bool sel = (dev.serial == dm.getSelectedSerial());
+                char rid[128]; snprintf(rid, sizeof(rid), "##s_%s", dev.serial.c_str());
+                if (ImGui::RadioButton(rid, sel)) dm.setSelectedSerial(dev.serial);
+
+                ImGui::TableNextColumn(); ImGui::Text("%s", dev.serial.c_str());
+                ImGui::TableNextColumn(); ImGui::Text("%s", dev.model.empty() ? "..." : dev.model.c_str());
+                ImGui::TableNextColumn();
+                if (dev.state == "device") ImGui::TextColored(ImVec4(0.3f,1,0.3f,1), "%s", TR("device_online"));
+                else if (dev.state == "unauthorized") ImGui::TextColored(ImVec4(1,0.3f,0.3f,1), "%s", TR("device_unauthorized"));
+                else ImGui::TextColored(ImVec4(0.6f,0.6f,0.6f,1), "%s", dev.state.c_str());
 
                 ImGui::TableNextColumn();
-                bool isSelected = (dev.serial == dm.getSelectedSerial());
-                char radioId[128];
-                snprintf(radioId, sizeof(radioId), "##sel_%s", dev.serial.c_str());
-                if (ImGui::RadioButton(radioId, isSelected)) {
-                    dm.setSelectedSerial(dev.serial);
-                }
-
-                ImGui::TableNextColumn();
-                ImGui::Text("%s", dev.serial.c_str());
-
-                ImGui::TableNextColumn();
-                ImGui::Text("%s", dev.model.empty() ? "..." : dev.model.c_str());
-
-                ImGui::TableNextColumn();
-                if (dev.state == "device") {
-                    ImGui::TextColored(ImVec4(0.3f, 1, 0.3f, 1), TR("device_online"));
-                } else if (dev.state == "unauthorized") {
-                    ImGui::TextColored(ImVec4(1, 0.3f, 0.3f, 1), TR("device_unauthorized"));
-                } else {
-                    ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1), dev.state.c_str());
-                }
-
-                ImGui::TableNextColumn();
-                ImGui::TextColored(
-                    dev.isUsb ? ImVec4(0.4f, 0.8f, 1, 1) : ImVec4(0.4f, 1, 0.4f, 1),
+                ImGui::TextColored(dev.isUsb ? ImVec4(0.4f,0.8f,1,1) : ImVec4(0.4f,1,0.4f,1),
                     "%s", dev.isUsb ? "USB" : "WiFi");
             }
             ImGui::EndTable();
         }
     }
 
-    // Show running instances
     renderRunningInstances();
 }
 
 // ── Connection Panel ─────────────────────────────────────────────────────────
 
 void ContentPanel::renderConnectionPanel() {
-    ImGui::Text(TR("menu_connection"));
+    ImGui::Text("%s", TR("menu_connection"));
     ImGui::Separator();
+    renderDescription("desc_connection");
 
-    ImGui::Text("WiFi (TCP/IP) Connection");
+    ImGui::Text("%s", TR("conn_wifi"));
     ImGui::Spacing();
 
     static char ipBuf[64] = "";
     static int port = 5555;
-    ImGui::InputText("IP Address", ipBuf, sizeof(ipBuf));
-    ImGui::InputInt("Port", &port);
+    ImGui::InputText(TR("conn_ip"), ipBuf, sizeof(ipBuf));
+    ImGui::InputInt(TR("conn_port"), &port);
 
-    if (ImGui::Button("Connect via WiFi", ImVec2(200, 0))) {
-        if (strlen(ipBuf) > 0) {
-            AdbManager::instance().connect(ipBuf, port);
-        }
+    if (ImGui::Button(TR("conn_connect_wifi"), ImVec2(200, 0))) {
+        if (strlen(ipBuf) > 0) AdbManager::instance().connect(ipBuf, port);
     }
 
     ImGui::Spacing();
     ImGui::Separator();
-
-    ImGui::Text("TCP/IP Setup Wizard");
-    ImGui::TextDisabled("1. Connect device via USB (or use another PC)");
-    ImGui::TextDisabled("2. Click 'Enable TCP/IP' below");
-    ImGui::TextDisabled("3. Disconnect USB cable");
-    ImGui::TextDisabled("4. Enter device IP above and connect");
+    ImGui::Text("%s", TR("conn_wizard"));
+    ImGui::TextDisabled("%s", TR("conn_step1"));
+    ImGui::TextDisabled("%s", TR("conn_step2"));
+    ImGui::TextDisabled("%s", TR("conn_step3"));
+    ImGui::TextDisabled("%s", TR("conn_step4"));
 
     auto& dm = DeviceManager::instance();
     std::string serial = dm.getSelectedSerial();
-
     if (serial.empty()) {
-        ImGui::TextDisabled("No device selected");
+        ImGui::TextDisabled("%s", TR("no_device_selected"));
     } else {
-        ImGui::Text("Selected: %s", serial.c_str());
-        if (ImGui::Button("Enable TCP/IP (port 5555)", ImVec2(250, 0))) {
+        ImGui::Text("%s: %s", TR("conn_selected"), serial.c_str());
+        if (ImGui::Button(TR("conn_enable_tcpip"), ImVec2(250, 0))) {
             AdbManager::instance().enableTcpip(serial, 5555);
         }
     }
@@ -285,10 +274,11 @@ void ContentPanel::renderConnectionPanel() {
 // ── Display Panel ────────────────────────────────────────────────────────────
 
 void ContentPanel::renderDisplayPanel() {
-    ImGui::Text(TR("menu_display"));
+    ImGui::Text("%s", TR("menu_display"));
     ImGui::Separator();
+    renderDescription("desc_display");
     if (StateManager::instance().getBool("otg", false)) {
-        ImGui::TextColored(ImVec4(1, 0.6f, 0.2f, 1), "OTG mode active: video controls disabled.");
+        ImGui::TextColored(ImVec4(1,0.6f,0.2f,1), "%s", TR("disp_otg_warning"));
         ImGui::Spacing();
     }
     renderFeatureControls("display");
@@ -297,10 +287,11 @@ void ContentPanel::renderDisplayPanel() {
 // ── Audio Panel ──────────────────────────────────────────────────────────────
 
 void ContentPanel::renderAudioPanel() {
-    ImGui::Text(TR("menu_audio"));
+    ImGui::Text("%s", TR("menu_audio"));
     ImGui::Separator();
+    renderDescription("desc_audio");
     if (StateManager::instance().getBool("otg", false)) {
-        ImGui::TextColored(ImVec4(1, 0.6f, 0.2f, 1), "OTG mode active: audio controls disabled.");
+        ImGui::TextColored(ImVec4(1,0.6f,0.2f,1), "%s", TR("audio_otg_warning"));
         ImGui::Spacing();
     }
     renderFeatureControls("audio");
@@ -309,64 +300,59 @@ void ContentPanel::renderAudioPanel() {
 // ── Control Panel ────────────────────────────────────────────────────────────
 
 void ContentPanel::renderControlPanel() {
-    ImGui::Text(TR("menu_control"));
+    ImGui::Text("%s", TR("menu_control"));
     ImGui::Separator();
+    renderDescription("desc_control");
     renderFeatureControls("control");
 }
 
 // ── Recording Panel ──────────────────────────────────────────────────────────
 
 void ContentPanel::renderRecordingPanel() {
-    ImGui::Text(TR("menu_recording"));
+    ImGui::Text("%s", TR("menu_recording"));
     ImGui::Separator();
+    renderDescription("desc_recording");
     renderFeatureControls("recording");
 }
 
 // ── Virtual Display Panel ────────────────────────────────────────────────────
 
 void ContentPanel::renderVirtualDisplayPanel() {
-    ImGui::Text(TR("menu_virtual_display"));
+    ImGui::Text("%s", TR("menu_virtual_display"));
     ImGui::Separator();
+    renderDescription("desc_virtual_display");
 
     renderFeatureControls("virtual_display");
 
     ImGui::Spacing();
     ImGui::Separator();
 
-    // ── Batch VD Launcher ────────────────────────────────────────────────────
-    ImGui::TextColored(ImVec4(0.4f, 0.8f, 1, 1), "Multi-Window Launcher");
-    ImGui::TextWrapped("Enter one app package per line. Each creates a separate "
-                       "resizable virtual display window with --flex-display.");
+    ImGui::TextColored(ImVec4(0.4f, 0.8f, 1, 1), "%s", TR("vd_launcher"));
+    ImGui::TextWrapped("%s", TR("vd_launcher_desc"));
     ImGui::Spacing();
 
-    ImGui::InputText("VD Size", m_vdSizeBuf, sizeof(m_vdSizeBuf));
-    ImGui::InputTextMultiline("##applist", m_vdAppListBuf, sizeof(m_vdAppListBuf),
-        ImVec2(-1, 120));
+    ImGui::InputText(TR("vd_size"), m_vdSizeBuf, sizeof(m_vdSizeBuf));
+    ImGui::InputTextMultiline("##applist", m_vdAppListBuf, sizeof(m_vdAppListBuf), ImVec2(-1, 120));
 
     auto& dm = DeviceManager::instance();
     std::string serial = dm.getSelectedSerial();
 
-    if (serial.empty()) {
-        ImGui::BeginDisabled();
-    }
+    if (serial.empty()) ImGui::BeginDisabled();
 
-    if (ImGui::Button("Launch All as Virtual Displays", ImVec2(300, 0))) {
+    if (ImGui::Button(TR("vd_launch_all"), ImVec2(300, 0))) {
         auto& cfg = ConfigManager::instance().getSettings();
         auto& pm = ProcessManager::instance();
 
-        // Parse package names (one per line)
         std::istringstream iss(m_vdAppListBuf);
         std::string line;
         int launched = 0;
         while (std::getline(iss, line)) {
-            // Trim whitespace
-            size_t start = line.find_first_not_of(" \t\r\n");
-            size_t end = line.find_last_not_of(" \t\r\n");
-            if (start == std::string::npos) continue;
-            std::string pkg = line.substr(start, end - start + 1);
+            size_t s = line.find_first_not_of(" \t\r\n");
+            size_t e = line.find_last_not_of(" \t\r\n");
+            if (s == std::string::npos) continue;
+            std::string pkg = line.substr(s, e - s + 1);
             if (pkg.empty()) continue;
 
-            // Build args for this VD
             std::vector<std::string> args = {
                 "--new-display=" + std::string(m_vdSizeBuf),
                 "--start-app=" + pkg,
@@ -378,143 +364,99 @@ void ContentPanel::renderVirtualDisplayPanel() {
             meta.name = pkg + " - VD " + m_vdSizeBuf;
             meta.appPackage = pkg;
             meta.vdSize = m_vdSizeBuf;
-            meta.serial = serial;
 
-            if (pm.startScrcpy(cfg.scrcpyPath, args, serial, meta)) {
-                launched++;
-                LOG_INFO("VD launched: %s on %s", pkg.c_str(), m_vdSizeBuf);
-            } else {
-                LOG_ERROR("Failed to launch VD for %s", pkg.c_str());
-            }
+            if (pm.startScrcpy(cfg.scrcpyPath, args, serial, meta)) launched++;
         }
-
-        if (launched > 0) {
-            LOG_INFO("Launched %d virtual display(s)", launched);
-        }
+        if (launched > 0) LOG_INFO("Launched %d VD(s)", launched);
     }
 
     if (serial.empty()) {
         ImGui::EndDisabled();
         ImGui::SameLine();
-        ImGui::TextColored(ImVec4(1, 0.5f, 0.3f, 1), "(no device)");
+        ImGui::TextColored(ImVec4(1,0.5f,0.3f,1), "%s", TR("no_device_selected"));
     }
 
-    // ── Running Instances ────────────────────────────────────────────────────
     renderRunningInstances();
 }
 
 // ── App Manager Panel ────────────────────────────────────────────────────────
 
 void ContentPanel::renderAppManagerPanel() {
-    ImGui::Text(TR("menu_app_manager"));
+    ImGui::Text("%s", TR("menu_app_manager"));
     ImGui::Separator();
+    renderDescription("desc_app_manager");
 
     auto& dm = DeviceManager::instance();
     auto& am = AppManager::instance();
-    auto& iconMgr = IconManager::instance();
     auto& cfg = ConfigManager::instance().getSettings();
     std::string serial = dm.getSelectedSerial();
 
     if (serial.empty()) {
-        ImGui::TextColored(ImVec4(1, 0.5f, 0.3f, 1), "No device selected");
+        ImGui::TextColored(ImVec4(1,0.5f,0.3f,1), "%s", TR("no_device_selected"));
+        ImGui::Text("%s", TR("select_device_first"));
         return;
     }
 
-    // Refresh button
     if (am.isRefreshing()) {
-        ImGui::Text("Refreshing app list...");
+        ImGui::Text("%s", TR("app_refreshing"));
     } else {
-        if (ImGui::Button("Refresh App List", ImVec2(200, 0))) {
-            std::thread([serial]() {
-                AppManager::instance().refreshAppList(serial);
-            }).detach();
+        if (ImGui::Button(TR("app_refresh_list"), ImVec2(200, 0))) {
+            std::thread([serial]() { AppManager::instance().refreshAppList(serial); }).detach();
         }
     }
-
-    ImGui::SameLine();
-    ImGui::TextDisabled("Polling: %ds", cfg.devicePollingInterval);
 
     ImGui::Spacing();
 
     auto apps = am.getApps();
     if (apps.empty()) {
-        ImGui::TextDisabled("No apps loaded. Click 'Refresh App List' to scan device.");
+        ImGui::TextDisabled("%s", TR("app_no_apps"));
         return;
     }
 
-    ImGui::Text("Apps (%zu):", apps.size());
+    ImGui::Text("%s (%zu):", TR("menu_app_manager"), apps.size());
     ImGui::SameLine();
     ImGui::SetNextItemWidth(200);
-    ImGui::InputTextWithHint("##app_filter", "Filter...", m_appFilterBuf, sizeof(m_appFilterBuf));
-
+    ImGui::InputTextWithHint("##af", TR("app_filter"), m_appFilterBuf, sizeof(m_appFilterBuf));
     ImGui::Spacing();
 
-    // App table
     if (ImGui::BeginTable("AppTable", 5,
         ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
         ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp,
         ImVec2(0, 400))) {
         ImGui::TableSetupColumn("App", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Package", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthFixed, 50);
-        ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 50);
-        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 280);
+        ImGui::TableSetupColumn(TR("dev_state"), ImGuiTableColumnFlags_WidthFixed, 50);
+        ImGui::TableSetupColumn(TR("dev_type"), ImGuiTableColumnFlags_WidthFixed, 50);
+        ImGui::TableSetupColumn("##", ImGuiTableColumnFlags_WidthFixed, 280);
         ImGui::TableHeadersRow();
 
         for (const auto& app : apps) {
-            if (m_appFilterBuf[0] != '\0' &&
-                app.packageName.find(m_appFilterBuf) == std::string::npos) {
-                continue;
-            }
+            if (m_appFilterBuf[0] != '\0' && app.packageName.find(m_appFilterBuf) == std::string::npos) continue;
 
             ImGui::TableNextRow();
-
-            // App name / icon
+            ImGui::TableNextColumn(); ImGui::Text("%s", app.packageName.c_str());
+            ImGui::TableNextColumn(); ImGui::TextDisabled("%s", app.packageName.c_str());
             ImGui::TableNextColumn();
-            // TODO: render icon texture if available
-            ImGui::Text("%s", app.packageName.c_str());
-
-            // Package name
+            if (app.enabled) ImGui::TextColored(ImVec4(0.3f,1,0.3f,1), "ON");
+            else ImGui::TextColored(ImVec4(0.6f,0.6f,0.6f,1), "OFF");
             ImGui::TableNextColumn();
-            ImGui::TextDisabled("%s", app.packageName.c_str());
+            ImGui::TextColored(app.isSystem ? ImVec4(0.6f,0.6f,1,1) : ImVec4(1,1,1,1),
+                "%s", app.isSystem ? TR("app_system") : TR("app_user"));
 
-            // Status
-            ImGui::TableNextColumn();
-            if (app.enabled) {
-                ImGui::TextColored(ImVec4(0.3f, 1, 0.3f, 1), "ON");
-            } else {
-                ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1), "OFF");
-            }
-
-            // Type
-            ImGui::TableNextColumn();
-            ImGui::TextColored(app.isSystem ? ImVec4(0.6f, 0.6f, 1, 1) : ImVec4(1, 1, 1, 1),
-                               "%s", app.isSystem ? "Sys" : "User");
-
-            // Actions
             ImGui::TableNextColumn();
             ImGui::PushID(app.packageName.c_str());
-
-            // Freeze/Unfreeze
             if (app.enabled) {
-                if (ImGui::SmallButton("Freeze")) am.freezeApp(serial, app.packageName);
+                if (ImGui::SmallButton(TR("app_freeze"))) am.freezeApp(serial, app.packageName);
             } else {
-                if (ImGui::SmallButton("Unfreeze")) am.unfreezeApp(serial, app.packageName);
+                if (ImGui::SmallButton(TR("app_unfreeze"))) am.unfreezeApp(serial, app.packageName);
             }
             ImGui::SameLine();
-
-            // Launch (main display)
-            if (app.enabled) {
-                if (ImGui::SmallButton("Launch")) am.launchApp(serial, app.packageName);
-            }
+            if (app.enabled && ImGui::SmallButton(TR("app_launch"))) am.launchApp(serial, app.packageName);
             ImGui::SameLine();
-
-            // Launch on VD (one-click multi-task)
-            if (app.enabled && ImGui::SmallButton("Open in VD")) {
-                std::string vdSize = strlen(m_vdSizeBuf) > 0 ? m_vdSizeBuf : "1920x1080";
-                am.launchAppOnVirtualDisplay(serial, app.packageName, vdSize);
+            if (app.enabled && ImGui::SmallButton(TR("app_open_vd"))) {
+                std::string vdSz = strlen(m_vdSizeBuf) > 0 ? m_vdSizeBuf : "1920x1080";
+                am.launchAppOnVirtualDisplay(serial, app.packageName, vdSz);
             }
-
             ImGui::PopID();
         }
         ImGui::EndTable();
@@ -524,76 +466,74 @@ void ContentPanel::renderAppManagerPanel() {
 // ── Camera Panel ─────────────────────────────────────────────────────────────
 
 void ContentPanel::renderCameraPanel() {
-    ImGui::Text(TR("menu_camera"));
+    ImGui::Text("%s", TR("menu_camera"));
     ImGui::Separator();
+    renderDescription("desc_camera");
     renderFeatureControls("camera");
 }
 
 // ── Gaming Panel ─────────────────────────────────────────────────────────────
 
 void ContentPanel::renderGamingPanel() {
-    ImGui::Text(TR("menu_gaming"));
+    ImGui::Text("%s", TR("menu_gaming"));
     ImGui::Separator();
+    renderDescription("desc_gaming");
     renderFeatureControls("advanced");
     ImGui::Spacing();
-    ImGui::TextDisabled("OTG mode: Direct USB input without mirroring.");
-    ImGui::TextDisabled("Requires WinUSB driver (install via Zadig on Win8.1).");
+    ImGui::TextDisabled("%s", TR("gaming_otg_desc"));
+    ImGui::TextDisabled("%s", TR("gaming_driver_hint"));
 }
 
 // ── Advanced Panel ───────────────────────────────────────────────────────────
 
 void ContentPanel::renderAdvancedPanel() {
-    ImGui::Text(TR("menu_advanced"));
+    ImGui::Text("%s", TR("menu_advanced"));
     ImGui::Separator();
+    renderDescription("desc_advanced");
 
-    ImGui::Text("Paste a scrcpy command to reverse-parse:");
-    if (ImGui::InputText("##cmd_parse", m_cmdInputBuf, sizeof(m_cmdInputBuf),
-        ImGuiInputTextFlags_EnterReturnsTrue)) {
+    ImGui::Text("%s", TR("adv_parse_cmd"));
+    if (ImGui::InputText("##cmd", m_cmdInputBuf, sizeof(m_cmdInputBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
         CommandBuilder::instance().parseCommandString(m_cmdInputBuf);
         memset(m_cmdInputBuf, 0, sizeof(m_cmdInputBuf));
     }
-
     ImGui::Spacing();
     ImGui::Separator();
+    ImGui::Text("%s", TR("adv_params"));
     renderFeatureControls("advanced");
 }
 
 // ── Logs Panel ───────────────────────────────────────────────────────────────
 
 void ContentPanel::renderLogsPanel() {
+    ImGui::Text("%s", TR("menu_logs"));
+    ImGui::Separator();
     Logger::instance().renderPanel();
 }
 
 // ── Settings Panel ───────────────────────────────────────────────────────────
 
 void ContentPanel::renderSettingsPanel() {
-    ImGui::Text(TR("menu_settings"));
+    ImGui::Text("%s", TR("menu_settings"));
     ImGui::Separator();
 
     auto& i18n = I18n::instance();
     auto& cfg = ConfigManager::instance().getSettings();
 
     // Language
-    ImGui::Text(TR("settings_language"));
-    const char* currentLang = (i18n.getLanguage() == I18n::Language::Chinese) ? "Chinese" : "English";
-    if (ImGui::BeginCombo("##lang", currentLang)) {
-        if (ImGui::Selectable("English", i18n.getLanguage() == I18n::Language::English)) {
-            i18n.setLanguage(I18n::Language::English);
-            cfg.language = "en";
-        }
-        if (ImGui::Selectable("Chinese", i18n.getLanguage() == I18n::Language::Chinese)) {
-            i18n.setLanguage(I18n::Language::Chinese);
-            cfg.language = "zh";
-        }
+    ImGui::Text("%s", TR("settings_language"));
+    const char* curLang = (i18n.getLanguage() == I18n::Language::Chinese) ? "Chinese" : "English";
+    if (ImGui::BeginCombo("##lang", curLang)) {
+        if (ImGui::Selectable("English", i18n.getLanguage() == I18n::Language::English)) { i18n.setLanguage(I18n::Language::English); cfg.language = "en"; }
+        if (ImGui::Selectable("Chinese", i18n.getLanguage() == I18n::Language::Chinese)) { i18n.setLanguage(I18n::Language::Chinese); cfg.language = "zh"; }
         ImGui::EndCombo();
     }
 
     // Theme
-    ImGui::Text(TR("settings_theme"));
-    const char* currentTheme = (cfg.theme == "light") ? "Light" : "Dark";
-    if (ImGui::BeginCombo("##theme", currentTheme)) {
-        if (ImGui::Selectable("Dark", cfg.theme == "dark")) cfg.theme = "dark";
-        if (ImGui::Selectable("Light", cfg.theme == "light")) cfg.theme = "light";
+    ImGui::Text("%s", TR("settings_theme"));
+    const char* curTheme = (cfg.theme == "light") ? TR("theme_light") : TR("theme_dark");
+    if (ImGui::BeginCombo("##theme", curTheme)) {
+        if (ImGui::Selectable(TR("theme_dark"), cfg.theme == "dark")) cfg.theme = "dark";
+        if (ImGui::Selectable(TR("theme_light"), cfg.theme == "light")) cfg.theme = "light";
         ImGui::EndCombo();
     }
 
@@ -601,78 +541,88 @@ void ContentPanel::renderSettingsPanel() {
     ImGui::Separator();
 
     // Profile
-    ImGui::Text("Profile (Scene Preset)");
-    static int selectedProfile = -1;
-    const char* profileNames[] = { "Custom", "Gaming", "Streaming", "Battery Saver" };
-    if (ImGui::BeginCombo("##profile", profileNames[selectedProfile + 1])) {
+    ImGui::Text("%s", TR("settings_profile"));
+    if (ImGui::CollapsingHeader(TR("settings_profile_desc"))) {
+        ImGui::TextWrapped("%s", TR("settings_profile_desc"));
+    }
+    static int selProf = -1;
+    const char* profNames[] = { "Custom", "Gaming", "Streaming", "Battery Saver" };
+    if (ImGui::BeginCombo("##prof", profNames[selProf + 1])) {
         for (int i = 0; i < 4; ++i) {
-            bool isSelected = (selectedProfile == i - 1);
-            if (ImGui::Selectable(profileNames[i], isSelected)) {
-                selectedProfile = i - 1;
-                if (selectedProfile >= 0) {
-                    const char* profileFiles[] = { "gaming", "streaming", "battery_saver" };
-                    ConfigManager::instance().loadProfile(profileFiles[selectedProfile]);
+            bool isSel = (selProf == i - 1);
+            if (ImGui::Selectable(profNames[i], isSel)) {
+                selProf = i - 1;
+                if (selProf >= 0) {
+                    const char* files[] = { "gaming", "streaming", "battery_saver" };
+                    ConfigManager::instance().loadProfile(files[selProf]);
                 }
             }
-            if (isSelected) ImGui::SetItemDefaultFocus();
+            if (isSel) ImGui::SetItemDefaultFocus();
         }
         ImGui::EndCombo();
     }
     ImGui::SameLine();
-    if (ImGui::SmallButton("Save as Profile")) {
-        ConfigManager::instance().saveProfile("custom");
-    }
+    if (ImGui::SmallButton(TR("settings_save_profile"))) ConfigManager::instance().saveProfile("custom");
 
     ImGui::Spacing();
     ImGui::Separator();
 
     // Paths
-    ImGui::Text(TR("settings_scrcpy_path"));
+    ImGui::Text("%s", TR("settings_scrcpy_path"));
+    if (ImGui::CollapsingHeader(TR("settings_paths_desc"))) {
+        ImGui::TextWrapped("%s", TR("settings_paths_desc"));
+    }
     static char scrcpyPath[256] = "";
-    static bool pathInit = false;
-    if (!pathInit) { strncpy(scrcpyPath, cfg.scrcpyPath.c_str(), 255); pathInit = true; }
-    ImGui::InputText("##scrcpy_path", scrcpyPath, sizeof(scrcpyPath));
+    static bool pInit = false;
+    if (!pInit) { strncpy(scrcpyPath, cfg.scrcpyPath.c_str(), 255); pInit = true; }
+    ImGui::InputText("##sp", scrcpyPath, sizeof(scrcpyPath));
 
-    ImGui::Text(TR("settings_adb_path"));
+    ImGui::Text("%s", TR("settings_adb_path"));
     static char adbPath[256] = "";
-    static bool adbPathInit = false;
-    if (!adbPathInit) { strncpy(adbPath, cfg.adbPath.c_str(), 255); adbPathInit = true; }
-    ImGui::InputText("##adb_path", adbPath, sizeof(adbPath));
+    static bool aInit = false;
+    if (!aInit) { strncpy(adbPath, cfg.adbPath.c_str(), 255); aInit = true; }
+    ImGui::InputText("##ap", adbPath, sizeof(adbPath));
 
     ImGui::Spacing();
     ImGui::Separator();
 
-    // Polling interval
-    ImGui::Text("Device Polling Interval (seconds)");
+    // Polling
+    ImGui::Text("%s", TR("settings_polling"));
+    if (ImGui::CollapsingHeader(TR("settings_polling_desc"))) {
+        ImGui::TextWrapped("%s", TR("settings_polling_desc"));
+    }
     ImGui::SliderInt("##poll", &cfg.devicePollingInterval, 5, 60);
 
-    // Icon fetching toggle
-    ImGui::Checkbox("Fetch app icons from device (slower first load)", &cfg.fetchAppIcons);
+    // Icons
+    ImGui::Checkbox(TR("settings_fetch_icons"), &cfg.fetchAppIcons);
+    if (ImGui::CollapsingHeader(TR("settings_icons_desc"))) {
+        ImGui::TextWrapped("%s", TR("settings_icons_desc"));
+    }
 
     ImGui::Spacing();
     ImGui::Separator();
 
-    // Encoding selector
-    ImGui::Text("Text Encoding (for adb/scrcpy output)");
-    ImGui::TextDisabled("Change this if Chinese/Japanese text shows as garbled characters.");
-    const char* encodingNames[] = {
+    // Encoding
+    ImGui::Text("%s", TR("settings_encoding"));
+    if (ImGui::CollapsingHeader(TR("settings_encoding_desc"))) {
+        ImGui::TextWrapped("%s", TR("settings_encoding_desc"));
+    }
+    const char* encNames[] = {
         "Auto (System Default)", "UTF-8", "GBK (Chinese Simplified)",
         "Big5 (Chinese Traditional)", "Shift-JIS (Japanese)",
         "EUC-KR (Korean)", "Latin-1 (Western)"
     };
-    int currentEncoding = static_cast<int>(Encoding::g_encodingMode);
-    if (ImGui::BeginCombo("##encoding", encodingNames[currentEncoding])) {
+    int curEnc = static_cast<int>(Encoding::g_encodingMode);
+    if (ImGui::BeginCombo("##enc", encNames[curEnc])) {
         for (int i = 0; i < 7; ++i) {
-            bool isSelected = (currentEncoding == i);
-            if (ImGui::Selectable(encodingNames[i], isSelected)) {
+            if (ImGui::Selectable(encNames[i], curEnc == i))
                 Encoding::g_encodingMode = static_cast<Encoding::EncodingMode>(i);
-            }
-            if (isSelected) ImGui::SetItemDefaultFocus();
+            if (curEnc == i) ImGui::SetItemDefaultFocus();
         }
         ImGui::EndCombo();
     }
 
-    if (ImGui::Button("Save Settings", ImVec2(150, 0))) {
+    if (ImGui::Button(TR("btn_save"), ImVec2(150, 0))) {
         cfg.scrcpyPath = scrcpyPath;
         cfg.adbPath = adbPath;
         ConfigManager::instance().saveSettings();
@@ -692,35 +642,30 @@ void ContentPanel::renderCommandPreview() {
         std::string preview = CommandBuilder::instance().buildPreviewString("scrcpy", serial);
 
         ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.1f, 0.1f, 0.15f, 1.0f));
-        char previewBuf[2048];
-        strncpy(previewBuf, preview.c_str(), sizeof(previewBuf) - 1);
-        previewBuf[sizeof(previewBuf) - 1] = '\0';
-        ImGui::InputTextMultiline("##preview", previewBuf, sizeof(previewBuf),
-            ImVec2(-1, 50), ImGuiInputTextFlags_ReadOnly);
+        char pbuf[2048];
+        strncpy(pbuf, preview.c_str(), sizeof(pbuf) - 1);
+        pbuf[sizeof(pbuf) - 1] = '\0';
+        ImGui::InputTextMultiline("##pv", pbuf, sizeof(pbuf), ImVec2(-1, 50), ImGuiInputTextFlags_ReadOnly);
         ImGui::PopStyleColor();
 
         ImGui::Spacing();
         auto& pm = ProcessManager::instance();
-
         if (pm.getActiveCount() > 0) {
             if (ImGui::Button(TR("btn_stop_scrcpy"), ImVec2(200, 30))) pm.stopAll();
             ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.4f, 1, 0.4f, 1), "Running (%zu)", pm.getActiveCount());
+            ImGui::TextColored(ImVec4(0.4f,1,0.4f,1), "%s (%zu)", TR("dev_active"), pm.getActiveCount());
         } else {
             if (serial.empty()) ImGui::BeginDisabled();
-
             if (ImGui::Button(TR("btn_start_scrcpy"), ImVec2(200, 30))) {
                 auto& cfg = ConfigManager::instance().getSettings();
                 auto args = CommandBuilder::instance().buildArgs(serial);
-                if (pm.startScrcpy(cfg.scrcpyPath, args, "", {})) {
-                    LOG_INFO("scrcpy started for device: %s", serial.c_str());
-                }
+                if (pm.startScrcpy(cfg.scrcpyPath, args, "", {}))
+                    LOG_INFO("scrcpy started for %s", serial.c_str());
             }
-
             if (serial.empty()) {
                 ImGui::EndDisabled();
                 ImGui::SameLine();
-                ImGui::TextColored(ImVec4(1, 0.5f, 0.3f, 1), "No device");
+                ImGui::TextColored(ImVec4(1,0.5f,0.3f,1), "%s", TR("no_device_selected"));
             }
         }
     }
