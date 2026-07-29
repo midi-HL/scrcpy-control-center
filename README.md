@@ -3,7 +3,7 @@
 ![License](https://img.shields.io/badge/License-MIT-blue.svg)
 ![C++ Standard](https://img.shields.io/badge/C%2B%2B-17-orange.svg)
 ![Platform](https://img.shields.io/badge/Platform-Windows%208.1%20x86-green.svg)
-![Build](https://img.shields.io/github/actions/workflow/status/user/scrcpy-control-center/build.yml?branch=master)
+![Build](https://img.shields.io/github/actions/workflow/status/midi-HL/scrcpy-control-center/build.yml?branch=master)
 
 A lightweight, high-performance scrcpy GUI wrapper optimized for Windows 8.1 32-bit (x86). Built with Dear ImGui and DirectX 9 for minimal resource usage.
 
@@ -43,7 +43,7 @@ Scrcpy Control Center is **not** a reimplementation of scrcpy. It is an advanced
 Requires Visual Studio 2019/2022 with C++ Desktop workload:
 
 ```batch
-git clone https://github.com/user/scrcpy-control-center.git
+git clone https://github.com/midi-HL/scrcpy-control-center.git
 cd scrcpy-control-center
 build.bat
 ```

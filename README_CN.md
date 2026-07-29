@@ -42,7 +42,7 @@ Scrcpy 控制中心**不是** scrcpy 的重新实现。它是一个高级 GUI �
 需要 Visual Studio 2019/2022 及 C++ 桌面开发工作负载：
 
 ```batch
-git clone https://github.com/user/scrcpy-control-center.git
+git clone https://github.com/midi-HL/scrcpy-control-center.git
 cd scrcpy-control-center
 build.bat
 ```
