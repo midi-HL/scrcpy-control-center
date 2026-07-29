@@ -1,0 +1,23 @@
+# Build output
+build/
+out/
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.log
+
+# IDE
+.vs/
+.vscode/
+*.user
+*.suo
+*.sln.docstates
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Config runtime state (not to be committed)
+config/last_state.json

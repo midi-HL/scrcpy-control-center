@@ -1,0 +1,6 @@
+{
+  "language": "en",
+  "theme": "dark",
+  "scrcpy_path": "scrcpy",
+  "adb_path": "adb"
+}

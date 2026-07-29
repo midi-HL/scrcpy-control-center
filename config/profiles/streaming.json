@@ -1,0 +1,16 @@
+{
+  "max_fps": 60,
+  "video_bit_rate": "24M",
+  "video_codec": "h265",
+  "max_size": 1920,
+  "no_audio": false,
+  "audio_codec": "opus",
+  "audio_bit_rate": "128K",
+  "audio_buffer": 50,
+  "video_buffer": 100,
+  "stay_awake": true,
+  "turn_screen_off": false,
+  "show_touches": false,
+  "keep_active": true,
+  "always_on_top": true
+}

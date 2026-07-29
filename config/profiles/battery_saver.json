@@ -1,0 +1,13 @@
+{
+  "max_fps": 15,
+  "video_bit_rate": "2M",
+  "video_codec": "h264",
+  "max_size": 720,
+  "no_audio": true,
+  "video_buffer": 200,
+  "stay_awake": false,
+  "turn_screen_off": true,
+  "show_touches": false,
+  "keep_active": false,
+  "no_power_on": true
+}
