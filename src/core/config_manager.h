@@ -15,14 +15,19 @@ public:
     struct Settings {
         std::string language = "en";
         std::string theme = "dark";
-        std::string scrcpyPath = "scrcpy";
-        std::string adbPath = "adb";
+        std::string scrcpyPath = "scrcpy";  // will be set to app dir on init
+        std::string adbPath = "adb";        // will be set to app dir on init
+        bool fetchAppIcons = true;          // toggle icon extraction from APK
+        int devicePollingInterval = 20;     // seconds between device polls
     };
 
     Settings& getSettings() { return m_settings; }
     const Settings& getSettings() const { return m_settings; }
     bool loadSettings();
     bool saveSettings();
+
+    // Set default paths to the application's own directory
+    void setDefaultPathsToAppDir();
 
     // Profile management
     bool loadProfile(const std::string& name);

@@ -37,7 +37,16 @@ private:
     // Command preview bar at the bottom
     void renderCommandPreview();
 
+    // Running instances panel (shared by VD and main panels)
+    void renderRunningInstances();
+
     // State for command preview input
     char m_cmdInputBuf[1024] = "";
-    bool m_showCmdPreview = true;
+
+    // State for batch VD launcher
+    char m_vdAppListBuf[2048] = "";   // one package per line
+    char m_vdSizeBuf[64] = "1920x1080";
+
+    // State for app filter
+    char m_appFilterBuf[128] = "";
 };

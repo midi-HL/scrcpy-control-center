@@ -27,18 +27,15 @@ HANDLE ProcessManager::createProcessWithPipe(const std::string& exePath,
         return INVALID_HANDLE_VALUE;
     }
 
-    // Read end must NOT be inherited by the child
     SetHandleInformation(outReadPipe, HANDLE_FLAG_INHERIT, 0);
 
     // Build command line with UTF-8 codepage prefix
-    // This forces child processes to output UTF-8 instead of GBK on Chinese Windows
     std::ostringstream innerCmd;
     innerCmd << "\"" << exePath << "\"";
     for (const auto& arg : args) {
         innerCmd << " " << arg;
     }
 
-    // Wrap in cmd.exe with chcp 65001 to force UTF-8 output
     std::ostringstream cmdLine;
     cmdLine << "cmd.exe /c \"chcp 65001 >nul && " << innerCmd.str() << "\"";
     std::string cmd = cmdLine.str();
@@ -52,18 +49,12 @@ HANDLE ProcessManager::createProcessWithPipe(const std::string& exePath,
 
     PROCESS_INFORMATION pi = {};
 
-    // Create the process
     BOOL ok = CreateProcessA(
-        nullptr,
-        const_cast<char*>(cmd.c_str()),
-        nullptr, nullptr,
-        TRUE,              // inherit handles
-        CREATE_NO_WINDOW,  // no console window
-        nullptr, nullptr,
-        &si, &pi
+        nullptr, const_cast<char*>(cmd.c_str()),
+        nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
+        nullptr, nullptr, &si, &pi
     );
 
-    // Close the write end in parent (child has its own copy)
     CloseHandle(hWritePipe);
 
     if (!ok) {
@@ -74,25 +65,21 @@ HANDLE ProcessManager::createProcessWithPipe(const std::string& exePath,
     }
 
     outPid = pi.dwProcessId;
-
-    // We don't need the thread handle
     CloseHandle(pi.hThread);
-
     return pi.hProcess;
 }
 
 bool ProcessManager::startScrcpy(const std::string& scrcpyPath,
                                   const std::vector<std::string>& args,
-                                  const std::string& serial) {
+                                  const std::string& serial,
+                                  const InstanceInfo& meta) {
     auto info = std::make_unique<ProcessInfo>();
-    info->name = "scrcpy";
+    info->name = meta.name.empty() ? "scrcpy" : meta.name;
+    info->meta = meta;
+    info->meta.serial = serial;
 
-    // Build full args with serial
+    // Build full args — serial is injected by CommandBuilder, not here
     std::vector<std::string> fullArgs = args;
-    if (!serial.empty()) {
-        fullArgs.insert(fullArgs.begin(), serial);
-        fullArgs.insert(fullArgs.begin(), "-s");
-    }
 
     HANDLE hReadPipe = INVALID_HANDLE_VALUE;
     DWORD pid = 0;
@@ -105,17 +92,17 @@ bool ProcessManager::startScrcpy(const std::string& scrcpyPath,
     info->hReadPipe = hReadPipe;
     info->processId = pid;
     info->running = true;
+    info->meta.processId = pid;
+    info->meta.running = true;
 
-    // Start reader thread (inside lock to prevent race with stopAll/cleanup)
-    size_t index;
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        index = m_processes.size();
-        m_processes.push_back(std::move(info));
-        m_processes[index]->readerThread = std::thread(&ProcessManager::readerThreadFunc, this, index);
-    }
+    // Start reader thread inside lock to prevent race with stopAll/cleanup
+    std::lock_guard<std::mutex> lock(m_mutex);
+    size_t index = m_processes.size();
+    m_processes.push_back(std::move(info));
+    m_processes[index]->readerThread = std::thread(&ProcessManager::readerThreadFunc, this, index);
 
-    LOG_INFO("Started scrcpy (PID: %lu) with %zu args", pid, fullArgs.size());
+    LOG_INFO("Started scrcpy '%s' (PID: %lu) with %zu args",
+             meta.name.c_str(), pid, fullArgs.size());
     return true;
 }
 
@@ -139,8 +126,6 @@ void ProcessManager::readerThreadFunc(size_t index) {
 
         buf[bytesRead] = '\0';
 
-        // Convert from system codepage (GBK on Chinese Windows) to UTF-8
-        // This is critical for proper ImGui rendering of adb/scrcpy output
         std::string line(buf, bytesRead);
         if (Encoding::isDbcsCodepage()) {
             line = Encoding::systemToUtf8(line);
@@ -150,7 +135,6 @@ void ProcessManager::readerThreadFunc(size_t index) {
             m_outputCallback(line);
         }
 
-        // Also log it
         LOG_INFO("[scrcpy] %s", line.c_str());
     }
 
@@ -159,6 +143,7 @@ void ProcessManager::readerThreadFunc(size_t index) {
         std::lock_guard<std::mutex> lock(m_mutex);
         if (index < m_processes.size()) {
             m_processes[index]->running = false;
+            m_processes[index]->meta.running = false;
         }
     }
 }
@@ -171,7 +156,8 @@ void ProcessManager::stopScrcpy(size_t index) {
     if (info->running) {
         TerminateProcess(info->hProcess, 1);
         info->running = false;
-        LOG_INFO("Stopped scrcpy (PID: %lu)", info->processId);
+        info->meta.running = false;
+        LOG_INFO("Stopped scrcpy '%s' (PID: %lu)", info->name.c_str(), info->processId);
     }
 }
 
@@ -181,6 +167,7 @@ void ProcessManager::stopAll() {
         if (info->running) {
             TerminateProcess(info->hProcess, 1);
             info->running = false;
+            info->meta.running = false;
         }
     }
     LOG_INFO("All scrcpy processes stopped");
@@ -195,6 +182,17 @@ size_t ProcessManager::getActiveCount() const {
     return count;
 }
 
+std::vector<InstanceInfo> ProcessManager::getInstances() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<InstanceInfo> result;
+    for (const auto& info : m_processes) {
+        InstanceInfo meta = info->meta;
+        meta.running = info->running;
+        result.push_back(meta);
+    }
+    return result;
+}
+
 bool ProcessManager::isRunning(size_t index) const {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (index >= m_processes.size()) return false;
@@ -204,7 +202,6 @@ bool ProcessManager::isRunning(size_t index) const {
 std::string ProcessManager::executeAdb(const std::string& adbPath,
                                         const std::vector<std::string>& args,
                                         int timeoutMs) {
-    // Build command line with UTF-8 codepage prefix
     std::ostringstream innerCmd;
     innerCmd << "\"" << adbPath << "\"";
     for (const auto& arg : args) {
@@ -246,12 +243,10 @@ std::string ProcessManager::executeAdb(const std::string& adbPath,
         return "";
     }
 
-    // Read output
     std::string output;
     char buf[4096];
     DWORD bytesRead;
 
-    // Use WaitForSingleObject with timeout to avoid hanging
     DWORD waitResult = WaitForSingleObject(pi.hProcess, timeoutMs);
     if (waitResult == WAIT_TIMEOUT) {
         TerminateProcess(pi.hProcess, 1);
@@ -267,7 +262,6 @@ std::string ProcessManager::executeAdb(const std::string& adbPath,
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
 
-    // Convert from system codepage to UTF-8 for proper display
     if (Encoding::isDbcsCodepage()) {
         output = Encoding::systemToUtf8(output);
     }

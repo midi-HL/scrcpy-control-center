@@ -3,14 +3,23 @@
 #include <string>
 #include <vector>
 #include <thread>
-#include <memory>
 #include <atomic>
 #include <functional>
 #include <mutex>
-#include <deque>
+#include <memory>
+
+// Metadata for each running scrcpy instance
+struct InstanceInfo {
+    std::string name;           // Display name (e.g., "Firefox - VD 1920x1080")
+    std::string appPackage;     // App package name (empty if main display)
+    std::string vdSize;         // Virtual display size (empty if main display)
+    std::string serial;         // Device serial
+    DWORD processId = 0;
+    bool running = false;
+};
 
 // Manages scrcpy and adb child processes with pipe-based stdout capture.
-// Handles CreateProcess, pipe redirection, and zombie process prevention.
+// Supports multiple simultaneous instances for multi-window workflows.
 class ProcessManager {
 public:
     struct ProcessInfo {
@@ -21,14 +30,16 @@ public:
         std::string name;
         std::thread readerThread;
         std::atomic<bool> running{false};
+        InstanceInfo meta;  // metadata for UI display
     };
 
     static ProcessManager& instance();
 
-    // Start a scrcpy instance with given arguments
+    // Start a scrcpy instance with given arguments and metadata
     bool startScrcpy(const std::string& scrcpyPath,
                      const std::vector<std::string>& args,
-                     const std::string& serial = "");
+                     const std::string& serial = "",
+                     const InstanceInfo& meta = {});
 
     // Stop a specific scrcpy instance by index
     void stopScrcpy(size_t index);
@@ -43,6 +54,9 @@ public:
 
     // Get number of active processes
     size_t getActiveCount() const;
+
+    // Get instance metadata list (for UI display)
+    std::vector<InstanceInfo> getInstances() const;
 
     // Check if a specific process is still running
     bool isRunning(size_t index) const;
@@ -60,7 +74,6 @@ private:
     ProcessManager(const ProcessManager&) = delete;
     ProcessManager& operator=(const ProcessManager&) = delete;
 
-    // Create process with redirected stdout/stderr
     HANDLE createProcessWithPipe(const std::string& exePath,
                                  const std::vector<std::string>& args,
                                  HANDLE& outReadPipe,

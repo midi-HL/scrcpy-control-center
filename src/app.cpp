@@ -6,6 +6,7 @@
 #include "core/config_manager.h"
 #include "core/device_manager.h"
 #include "core/process_manager.h"
+#include "core/icon_manager.h"
 #include "utils/logger.h"
 #include "utils/i18n.h"
 
@@ -178,6 +179,15 @@ void App::applyLightTheme() {
 // ── Full Initialization ─────────────────────────────────────────────────────
 
 bool App::init(HINSTANCE hInstance) {
+    // 0. DPI awareness for multi-resolution support (Win8.1 compatible)
+    typedef BOOL(WINAPI *SetProcessDPIAwareFunc)();
+    auto pSetDPIAware = (SetProcessDPIAwareFunc)GetProcAddress(
+        GetModuleHandleA("user32.dll"), "SetProcessDPIAware");
+    if (pSetDPIAware) {
+        pSetDPIAware();
+        LOG_INFO("DPI awareness enabled");
+    }
+
     // 1. Load feature mapping (must be first — everything depends on this)
     if (!FeatureParser::instance().loadFromFile("config/scrcpy_features.json")) {
         LOG_ERROR("Failed to load feature mapping — UI will be empty");
@@ -186,7 +196,7 @@ bool App::init(HINSTANCE hInstance) {
     // 2. Initialize state from feature defaults
     StateManager::instance().initFromDefaults();
 
-    // 3. Initialize config manager
+    // 3. Initialize config manager (sets default paths to app directory)
     ConfigManager::instance().init("config");
 
     // 4. Load saved state if exists
@@ -201,14 +211,16 @@ bool App::init(HINSTANCE hInstance) {
     // 7. Initialize ImGui
     if (!initImGui()) return false;
 
-    // 8. Start device polling
-    auto& cfg = ConfigManager::instance().getSettings();
-    DeviceManager::instance().startPolling(cfg.adbPath);
+    // 8. Initialize icon manager
+    IconManager::instance().init("cache/icons");
 
-    // 9. Wire up ProcessManager output → Logger (so scrcpy output appears in Logs panel)
+    // 9. Start device polling (interval from settings, default 20s)
+    auto& cfg = ConfigManager::instance().getSettings();
+    int pollIntervalMs = cfg.devicePollingInterval * 1000;
+    DeviceManager::instance().startPolling(cfg.adbPath, pollIntervalMs);
+
+    // 10. Wire up ProcessManager output → Logger
     ProcessManager::instance().setOutputCallback([](const std::string& line) {
-        // The line is already converted to UTF-8 by ProcessManager
-        // Trim trailing newlines for cleaner log display
         std::string trimmed = line;
         while (!trimmed.empty() && (trimmed.back() == '\n' || trimmed.back() == '\r')) {
             trimmed.pop_back();
@@ -218,12 +230,13 @@ bool App::init(HINSTANCE hInstance) {
         }
     });
 
-    // 10. Apply theme
+    // 11. Apply theme
     if (cfg.theme == "light") {
         applyLightTheme();
     }
 
-    LOG_INFO("Application initialized successfully");
+    LOG_INFO("Application initialized successfully (polling: %ds, scrcpy: %s, adb: %s)",
+             cfg.devicePollingInterval, cfg.scrcpyPath.c_str(), cfg.adbPath.c_str());
     return true;
 }
 

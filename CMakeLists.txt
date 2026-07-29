@@ -42,6 +42,7 @@ set(APP_SOURCES
     src/core/feature_parser.cpp
     src/core/device_manager.cpp
     src/core/app_manager.cpp
+    src/core/icon_manager.cpp
     src/utils/logger.cpp
     src/utils/i18n.cpp
 )
