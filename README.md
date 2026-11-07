@@ -1,4 +1,4 @@
-[??????](docs/%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E.md)
+[中文使用说明](docs/%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E.md)
 
 # Scrcpy Control Center
 
